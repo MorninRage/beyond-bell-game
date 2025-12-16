@@ -203,35 +203,62 @@ class SpaceShooterGame {
             this.keys[e.code] = false;
         });
 
-        // Mouse - track mouse anywhere on screen, not just canvas
-        document.addEventListener('mousemove', (e) => {
+        // Pointer input (mouse/pen/touch) -> canvas coordinates (handles CSS scaling/DPI)
+        const updatePointerPosition = (clientX, clientY) => {
+            if (!this.canvas) return;
             const rect = this.canvas.getBoundingClientRect();
-            // Only update if mouse is over canvas area
-            if (e.clientX >= rect.left && e.clientX <= rect.right &&
-                e.clientY >= rect.top && e.clientY <= rect.bottom) {
-                this.mouse.x = e.clientX - rect.left;
-                this.mouse.y = e.clientY - rect.top;
-            } else {
-                // Still track mouse position even outside canvas
-                this.mouse.x = e.clientX - rect.left;
-                this.mouse.y = e.clientY - rect.top;
-            }
-        });
+            // Avoid divide-by-zero when canvas is not laid out yet
+            const scaleX = rect.width ? (this.canvas.width / rect.width) : 1;
+            const scaleY = rect.height ? (this.canvas.height / rect.height) : 1;
+            this.mouse.x = (clientX - rect.left) * scaleX;
+            this.mouse.y = (clientY - rect.top) * scaleY;
+        };
 
-        // Mouse events on document to work through panels
+        // Prefer pointer events when available
+        if ('PointerEvent' in window) {
+            document.addEventListener('pointermove', (e) => {
+                updatePointerPosition(e.clientX, e.clientY);
+            }, { passive: true });
+        } else {
+            document.addEventListener('mousemove', (e) => {
+                updatePointerPosition(e.clientX, e.clientY);
+            }, { passive: true });
+        }
+
+        // Touch fallback (older browsers / iOS edge cases)
+        document.addEventListener('touchmove', (e) => {
+            const t = e.touches && e.touches[0];
+            if (t) updatePointerPosition(t.clientX, t.clientY);
+        }, { passive: true });
+
+        // Mouse/pointer down events on document to work through panels
+        const handlePress = (e, clientX, clientY, target) => {
+            if (this.gameState !== 'playing') return;
+            // Only shoot when the press started on the canvas
+            if (target !== this.canvas) return;
+            updatePointerPosition(clientX, clientY);
+            if (e && e.preventDefault) e.preventDefault();
+            this.mouseDown = true;
+            this.shoot();
+        };
+
         document.addEventListener('mousedown', (e) => {
-            if (this.gameState === 'playing' && e.target === this.canvas) {
-                e.preventDefault();
-                this.mouseDown = true;
-                this.shoot();
-            }
+            handlePress(e, e.clientX, e.clientY, e.target);
         });
 
-        document.addEventListener('mouseup', (e) => {
-            if (e.target === this.canvas) {
-                this.mouseDown = false;
-            }
+        document.addEventListener('touchstart', (e) => {
+            const t = e.touches && e.touches[0];
+            if (!t) return;
+            handlePress(e, t.clientX, t.clientY, e.target);
+        }, { passive: false });
+
+        document.addEventListener('mouseup', () => {
+            this.mouseDown = false;
         });
+
+        document.addEventListener('touchend', () => {
+            this.mouseDown = false;
+        }, { passive: true });
 
         document.addEventListener('mouseleave', () => {
             this.mouseDown = false;
