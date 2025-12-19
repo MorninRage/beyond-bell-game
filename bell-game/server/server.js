@@ -7,6 +7,12 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// For Render free tier - handle spin-down gracefully
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully');
+    process.exit(0);
+});
 const LEADERBOARD_FILE = path.join(__dirname, 'leaderboard.json');
 
 // Middleware
