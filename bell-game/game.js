@@ -802,6 +802,8 @@ class SpaceShooterGame {
         
         // Player equipment
         this.currentShip = 'basic';
+        // Tank ship enhancement state (0..1) - builds while stationary, decays while moving
+        this.tankFortify = 0;
         this.currentWeapons = ['basic']; // Array to support multiple weapons
         this.currentShield = 'none';
         this.currentUpgrades = []; // Array to support multiple upgrades (targeting computer, auto-collector, etc.)
@@ -928,7 +930,7 @@ class SpaceShooterGame {
                 basic: { speed: 150, health: 100, size: 27, color: '#4fc3f7', shape: 'triangle' }, // Atomic Fighter
                 fast: { speed: 220, health: 75, size: 25, color: '#ff9800', shape: 'sleek', bonus: 'speedBoost' }, // Faster, roughly matching basic ship size
                 rapid: { speed: 260, health: 95, size: 26, color: '#9c27b0', shape: 'rapid', bonus: 'rapidFire', description: 'Enhanced rapid ship - extreme speed with rapid-fire capabilities' }, // Enhanced rapid ship - faster than fast, better health, matching basic ship size, purple color scheme
-                tank: { speed: 90, health: 250, size: 28, color: '#9e9e9e', shape: 'wide', bonus: 'damageResist' }, // Slower, bigger, more health, takes less damage
+                tank: { speed: 90, health: 250, size: 28, color: '#9e9e9e', shape: 'wide', bonus: 'damageResist', description: 'Fortified tank - takes less damage, and becomes even tougher while stationary' }, // Slower, bigger, more health, takes less damage
                 agile: { speed: 190, health: 110, size: 16, color: '#00bcd4', shape: 'diamond', bonus: 'evasion' }, // Balanced, smaller hitbox, better dodging
                 // High-tier ships based on Einstein's individual system physics
                 individualStabilizer: { speed: 250, health: 200, size: 18, color: '#ff6b00', shape: 'sleek', bonus: 'stabilized', description: 'Stabilizes individual systems - high speed and health' },
@@ -4436,7 +4438,18 @@ class SpaceShooterGame {
         // Calculate durability loss based on damage
         // Formula: 1% durability loss per 10 damage (balanced)
         // Higher level = more damage = more decay
-        const durabilityLoss = (damageAmount / 10) * (1 + this.level * 0.01); // Scales with level
+        let durabilityLoss = (damageAmount / 10) * (1 + this.level * 0.01); // Scales with level
+        
+        // Tank ship enhancement: armored hull takes less durability decay from damage,
+        // scaling with Fortify.
+        if (type === 'ships') {
+            const ship = this.equipmentStats && this.equipmentStats.ships ? this.equipmentStats.ships[name] : null;
+            if (ship && ship.bonus === 'damageResist') {
+                const fortify = this.tankFortify || 0;
+                const decayReduction = 0.25 + fortify * 0.15; // 25%..40% less durability loss
+                durabilityLoss = durabilityLoss * (1 - decayReduction);
+            }
+        }
         
         // Apply decay
         item.durability = Math.max(0, item.durability - durabilityLoss);
@@ -5182,6 +5195,21 @@ class SpaceShooterGame {
         if (atBottomEdge && hasDown) {
             // At bottom edge trying to go down - allow movement up (away from edge)
             this.player.y = Math.max(minY, this.player.y - totalSpeed * deltaTime * 0.5);
+        }
+
+        // Tank ship enhancement: "Fortify" ramps up while stationary, decays while moving.
+        // Keeps the same simple bonus style as fast/rapid, but adds tank identity without visual redesign.
+        if (ship && ship.bonus === 'damageResist') {
+            const fortifyEligible = (this.gameState === 'playing' && !this.levelUpState && !this.boostActive);
+            if (fortifyEligible && !isMoving) {
+                // Build over ~2 seconds to full
+                this.tankFortify = Math.min(1, (this.tankFortify || 0) + deltaTime * 0.5);
+            } else {
+                // Decay quickly when moving / boosting / menus
+                this.tankFortify = Math.max(0, (this.tankFortify || 0) - deltaTime * 1.5);
+            }
+        } else {
+            this.tankFortify = 0;
         }
 
         // Shield regeneration - for quantum shields and high-tier shields, plus regen bonus
@@ -6283,7 +6311,12 @@ class SpaceShooterGame {
                         
                         // Apply ship-specific damage reduction
                         if (ship.bonus === 'damageResist') {
-                            damage = damage * 0.7; // Tank takes 30% less damage
+                            // Tank: base 30% reduction + fortify bonus up to +15% while stationary
+                            let damageReduction = (this.playerStats.damageReduction || 0) / 100;
+                            damageReduction += 0.3;
+                            damageReduction += (this.tankFortify || 0) * 0.15;
+                            damageReduction = Math.min(0.5, damageReduction); // Cap at 50% (consistent with bullet damage)
+                            damage = damage * (1 - damageReduction);
                         } else if (ship.bonus === 'evasion') {
                             // Agile ship has 20% chance to dodge
                             if (Math.random() < 0.2) {
@@ -6698,6 +6731,7 @@ class SpaceShooterGame {
                     let damageReduction = this.playerStats.damageReduction / 100;
                     if (ship.bonus === 'damageResist') {
                         damageReduction += 0.3; // +30% from ship bonus
+                        damageReduction += (this.tankFortify || 0) * 0.15; // up to +15% while fortified
                     }
                     damageReduction = Math.min(0.5, damageReduction); // Cap at 50%
                     damage = damage * (1 - damageReduction);
